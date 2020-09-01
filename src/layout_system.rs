@@ -7,15 +7,18 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 
-pub struct LayoutSystem<'a> {
-	windows: Vec<WindowDom<'a>>,
+pub struct LayoutSystem {
+	windows: Vec<WindowDom>,
 	loaded_components: ResourceCache<FlatComponent>,
 	attribute_parser: AttributeParser,
 }
 
-impl<'a> LayoutSystem<'a> {
+unsafe impl Send for LayoutSystem {}
+unsafe impl Sync for LayoutSystem {}
+
+impl LayoutSystem {
 	/// Construct the `LayoutSystem` with zero windows, an empty cache of component XML layouts, and an `AttributeParser` with its regex parsers
-	pub fn new() -> Self {
+	pub fn new() -> LayoutSystem {
 		Self {
 			windows: vec![],
 			loaded_components: ResourceCache::new(),
@@ -24,18 +27,17 @@ impl<'a> LayoutSystem<'a> {
 	}
 
 	/// Load and construct a new window from a layout component
-	pub fn add_window(&'a mut self, name: (&str, &str)) {
+	pub fn add_window(&mut self, name: (&str, &str)) {
 		// Preload the component and its dependencies
 		self.preload_component(name)
 			.expect(&format!("Failure loading layout component '{}'", Self::component_name(name))[..]);
 
 		// Get the now-loaded component
 		let window_root_component_name = Self::component_name(name);
-		// let window_root_component = self.loaded_components.get(&window_root_component_name[..]).unwrap();
-		// println!("FC: {:#?}", window_root_component);
+		let window_root_component = self.loaded_components.get(&window_root_component_name[..]).unwrap();
 
 		// Construct the window and save it
-		let new_window = WindowDom::new(&window_root_component_name[..], (1920, 1080), &self.loaded_components);
+		let new_window = WindowDom::new(window_root_component);
 		self.windows.push(new_window);
 	}
 
@@ -68,7 +70,7 @@ impl<'a> LayoutSystem<'a> {
 		}
 
 		// Go through each parameter attribute and preload any default values of layouts
-		for definition in &component.own_info.parameters {
+		for definition in &component.own_info.user_attributes {
 			for default in definition.type_sequence_default.iter() {
 				if let TypeValue::Layout(layouts) = default {
 					for layout in layouts {
@@ -176,7 +178,7 @@ impl<'a> LayoutSystem<'a> {
 				}).collect::<Vec<_>>();
 				cloned_tag.set_content(children);
 
-				// Return this `LayoutComponentTag` within the component's root definition tag
+				// Return this LayoutComponentTag within the component's root definition tag
 				Some(cloned_tag)
 			})
 			.collect::<Vec<_>>();
@@ -339,7 +341,7 @@ impl<'a> LayoutSystem<'a> {
 	}
 
 	/// Get a string in `namespace:name` format (or just `name` for primitives) given a namespace and component name
-	pub fn component_name(name: (&str, &str)) -> String {
+	fn component_name(name: (&str, &str)) -> String {
 		let (namespace, file) = name;
 		if namespace.len() > 0 {
 			format!("{}:{}", namespace, file)
